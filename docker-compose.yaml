@@ -1,0 +1,137 @@
+services:
+  # cloudflared:
+  #   image: cloudflare/cloudflared:latest
+  #   container_name: cloudflared
+  #   restart: always
+  #   command: tunnel --no-autoupdate run
+  #   environment:
+  #     - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+  #   networks:
+  #     - private-bridge
+  #   depends_on:
+  #     - evolution-api
+  #     - n8n
+  #     - portainer
+
+  # evolution-api:
+  #   container_name: evolution_api
+  #   image: evoapicloud/evolution-api:homolog
+  #   restart: always
+  #   # porta NÃO publicada no host; só acessível via cloudflared/rede interna
+  #   expose:
+  #     - "8080"
+  #   env_file:
+  #     - .env
+  #   volumes:
+  #     - evolution_instances:/evolution/instances
+  #   networks:
+  #     - private-bridge
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+
+  traefik:
+    container_name: traefik
+    image: "traefik:v3.0"
+    restart: always
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+    ports:
+      - "80:80"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - private-bridge
+
+  n8n:
+    container_name: n8n
+    image: n8nio/n8n:latest
+    restart: always
+    environment:
+      - N8N_HOST=n8n.localhost
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - WEBHOOK_URL=http://n8n.localhost
+      - N8N_PROXY_HOPS=1
+      # CORREÇÃO DO ERRO: Permite o uso de cookies em conexões locais HTTP comuns
+      - N8N_SECURE_COOKIE=false
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.n8n.rule=Host(`n8n.localhost`)"
+      - "traefik.http.routers.n8n.entrypoints=web"
+      - "traefik.http.services.n8n.loadbalancer.server.port=5678"
+    volumes:
+      - n8n-data:/home/node/.n8n
+    networks:
+      - private-bridge
+
+# container funcionando
+  portainer:
+      container_name: portainer
+      image: portainer/portainer-ce:lts
+      restart: always
+      volumes:
+        - /var/run/docker.sock:/var/run/docker.sock
+        - portainer_data:/data
+      ports:
+        - 9443:9443  # Use this port to access the Portainer web interface
+        - 8000:8000  # Remove if you do not intend to use Edge Agents
+
+# container funcionando
+  postgres:
+    container_name: postgres
+    image: postgres:16-alpine
+    restart: always
+    # porta NÃO publicada no host, só a rede interna acessa
+    expose:
+      - "5432"
+    volumes:
+      - postgres-volume:/var/lib/postgresql/data
+    env_file:
+      - .env
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - private-bridge
+
+# container funcionando
+  redis:
+    container_name: redis
+    image: redis:alpine
+    restart: always
+    expose:
+      - "6379"
+    volumes:
+      - redis-volume:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - private-bridge
+
+volumes:
+  evolution_instances:
+  portainer_data:
+  postgres-volume:
+  redis-volume:
+  n8n-data:
+  traefik_data:
+
+networks:
+  private-bridge:
+    driver: bridge
