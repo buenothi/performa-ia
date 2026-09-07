@@ -1,51 +1,41 @@
-services:
-  # cloudflared:
-  #   image: cloudflare/cloudflared:latest
-  #   container_name: cloudflared
-  #   restart: always
-  #   command: tunnel --no-autoupdate run
-  #   environment:
-  #     - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
-  #   networks:
-  #     - private-bridge
-  #   depends_on:
-  #     - evolution-api
-  #     - n8n
-  #     - portainer
+version: "3.8"
 
-  # evolution-api:
-  #   container_name: evolution_api
-  #   image: evoapicloud/evolution-api:homolog
-  #   restart: always
-  #   # porta NÃO publicada no host; só acessível via cloudflared/rede interna
-  #   expose:
-  #     - "8080"
-  #   env_file:
-  #     - .env
-  #   volumes:
-  #     - evolution_instances:/evolution/instances
-  #   networks:
-  #     - private-bridge
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
-  #     redis:
-  #       condition: service_healthy
+services:
+  # Opcional: Se optar por usar Cloudflare Tunnel no futuro, mantenha desmarcado.
+  # Para acesso direto via DuckDNS com portas 80/443 abertas, o Traefik cuida de tudo.
 
   traefik:
     container_name: traefik
     image: "traefik:v3.0"
     restart: always
+    environment:
+      - DUCKDNS_TOKEN=${DUCKDNS_TOKEN}
     command:
       - "--api.insecure=true"
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
+      - "--providers.docker.network=private-bridge"
+      
+      # Entrypoints HTTP e HTTPS
       - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      
+      # Redirecionamento automático de HTTP para HTTPS
+      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+      
+      # SSL Let's Encrypt via Desafio DNS do DuckDNS
+      - "--certificatesresolvers.letsencrypt.acme.dnschallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.dnschallenge.provider=duckdns"
+      - "--certificatesresolvers.letsencrypt.acme.email=${EMAIL:-seu-email@dominio.com}"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+      - "--certificatesresolvers.letsencrypt.acme.dnschallenge.resolvers=1.1.1.1:53,8.8.8.8:53"
     ports:
       - "80:80"
-      - "8080:8080"
+      - "443:443"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik_certs:/letsencrypt
     networks:
       - private-bridge
 
@@ -54,41 +44,69 @@ services:
     image: n8nio/n8n:latest
     restart: always
     environment:
-      - N8N_HOST=n8n.localhost
+      - N8N_HOST=performa-ia.duckdns.org
       - N8N_PORT=5678
-      - N8N_PROTOCOL=http
-      - WEBHOOK_URL=http://n8n.localhost
+      - N8N_PROTOCOL=https
+      - WEBHOOK_URL=https://performa-ia.duckdns.org/
       - N8N_PROXY_HOPS=1
-      # CORREÇÃO DO ERRO: Permite o uso de cookies em conexões locais HTTP comuns
-      - N8N_SECURE_COOKIE=false
+      - N8N_SECURE_COOKIE=true
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.n8n.rule=Host(`n8n.localhost`)"
-      - "traefik.http.routers.n8n.entrypoints=web"
+      - "traefik.http.routers.n8n.rule=Host(`performa-ia.duckdns.org`)"
+      - "traefik.http.routers.n8n.entrypoints=websecure"
+      - "traefik.http.routers.n8n.tls=true"
+      - "traefik.http.routers.n8n.tls.certresolver=letsencrypt"
       - "traefik.http.services.n8n.loadbalancer.server.port=5678"
+      - "traefik.docker.network=private-bridge"
     volumes:
       - n8n-data:/home/node/.n8n
     networks:
       - private-bridge
 
-# container funcionando
-  portainer:
-      container_name: portainer
-      image: portainer/portainer-ce:lts
-      restart: always
-      volumes:
-        - /var/run/docker.sock:/var/run/docker.sock
-        - portainer_data:/data
-      ports:
-        - 9443:9443  # Use this port to access the Portainer web interface
-        - 8000:8000  # Remove if you do not intend to use Edge Agents
+  evolution-api:
+    container_name: evolution_api
+    image: evoapicloud/evolution-api:homolog
+    restart: always
+    expose:
+      - "8080"
+    env_file:
+      - .env
+    labels:
+      - "traefik.enable=true"
+      # Exemplo de acesso para Evolution via subdomínio/path se desejar expor via Traefik:
+      - "traefik.http.routers.evolution.rule=Host(`api-performa-ia.duckdns.org`)"
+      - "traefik.http.routers.evolution.entrypoints=websecure"
+      - "traefik.http.routers.evolution.tls=true"
+      - "traefik.http.routers.evolution.tls.certresolver=letsencrypt"
+      - "traefik.http.services.evolution.loadbalancer.server.port=8080"
+      - "traefik.docker.network=private-bridge"
+    volumes:
+      - evolution_instances:/evolution/instances
+    networks:
+      - private-bridge
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
-# container funcionando
+  portainer:
+    container_name: portainer
+    image: portainer/portainer-ce:lts
+    restart: always
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer_data:/data
+    ports:
+      - "9443:9443"
+      - "8000:8000"
+    networks:
+      - private-bridge
+
   postgres:
     container_name: postgres
     image: postgres:16-alpine
     restart: always
-    # porta NÃO publicada no host, só a rede interna acessa
     expose:
       - "5432"
     volumes:
@@ -107,7 +125,6 @@ services:
     networks:
       - private-bridge
 
-# container funcionando
   redis:
     container_name: redis
     image: redis:alpine
@@ -124,14 +141,14 @@ services:
     networks:
       - private-bridge
 
+networks:
+  private-bridge:
+    driver: bridge
+
 volumes:
   evolution_instances:
   portainer_data:
   postgres-volume:
   redis-volume:
   n8n-data:
-  traefik_data:
-
-networks:
-  private-bridge:
-    driver: bridge
+  traefik_certs:
