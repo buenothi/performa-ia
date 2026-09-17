@@ -1,9 +1,6 @@
 version: "3.8"
 
 services:
-  # Opcional: Se optar por usar Cloudflare Tunnel no futuro, mantenha desmarcado.
-  # Para acesso direto via DuckDNS com portas 80/443 abertas, o Traefik cuida de tudo.
-
   traefik:
     container_name: traefik
     image: "traefik:v3.0"
@@ -11,7 +8,8 @@ services:
     environment:
       - DUCKDNS_TOKEN=${DUCKDNS_TOKEN}
     command:
-      - "--api.insecure=true"
+      # Desativado o mode insecure e habilitado o dashboard interno
+      - "--api.dashboard=true"
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
       - "--providers.docker.network=private-bridge"
@@ -33,6 +31,18 @@ services:
     ports:
       - "80:80"
       - "443:443"
+    labels:
+      - "traefik.enable=true"
+      # Roteador do Dashboard do Traefik
+      - "traefik.http.routers.traefik-dashboard.rule=Host(`traefik-performa-ia.duckdns.org`)"
+      - "traefik.http.routers.traefik-dashboard.entrypoints=websecure"
+      - "traefik.http.routers.traefik-dashboard.tls=true"
+      - "traefik.http.routers.traefik-dashboard.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.traefik-dashboard.service=api@internal"
+      # Autenticação Básica (Obrigatório para segurança)
+      # Usuário padrão abaixo: admin / senha: adminpassword (gerado via htpasswd - crie a sua hash)
+      - "traefik.http.routers.traefik-dashboard.middlewares=traefik-auth"
+      - "traefik.http.middlewares.traefik-auth.basicauth.users=admin:$$apr1$$0eHZ7PMa$$FIfgaD9NrTTue1Pcu5o/p/"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - traefik_certs:/letsencrypt
@@ -65,7 +75,7 @@ services:
 
   evolution-api:
     container_name: evolution_api
-    image: evoapicloud/evolution-api:homolog
+    image: evoapicloud/evolution-api:v2.1.1
     restart: always
     expose:
       - "8080"
@@ -73,13 +83,16 @@ services:
       - .env
     labels:
       - "traefik.enable=true"
-      # Exemplo de acesso para Evolution via subdomínio/path se desejar expor via Traefik:
       - "traefik.http.routers.evolution.rule=Host(`api-performa-ia.duckdns.org`)"
       - "traefik.http.routers.evolution.entrypoints=websecure"
       - "traefik.http.routers.evolution.tls=true"
       - "traefik.http.routers.evolution.tls.certresolver=letsencrypt"
       - "traefik.http.services.evolution.loadbalancer.server.port=8080"
       - "traefik.docker.network=private-bridge"
+      - "traefik.http.middlewares.evolution-cors.headers.accesscontrolallowmethods=GET,POST,PUT,DELETE,OPTIONS"
+      - "traefik.http.middlewares.evolution-cors.headers.accesscontrolallowheaders=*"
+      - "traefik.http.middlewares.evolution-cors.headers.accesscontrolalloworiginlist=*"
+      - "traefik.http.routers.evolution.middlewares=evolution-cors"
     volumes:
       - evolution_instances:/evolution/instances
     networks:
