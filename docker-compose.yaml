@@ -54,8 +54,8 @@ services:
     networks:
       - private-bridge
 
-  n8n:
-    container_name: n8n
+  n8n-trigger:
+    container_name: n8n-trigger
     image: n8nio/n8n:latest
     restart: always
     environment:
@@ -65,6 +65,8 @@ services:
       - WEBHOOK_URL=https://performa-ia.duckdns.org:8443/
       - N8N_PROXY_HOPS=1
       - N8N_SECURE_COOKIE=true
+      - QUEUE_BULL_REDIS_HOST=localhost
+      - QUEUE_BULL_REDIS_PORT=6379
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.n8n.rule=Host(`performa-ia.duckdns.org`)"
@@ -73,6 +75,22 @@ services:
       - "traefik.http.routers.n8n.tls.certresolver=letsencrypt"
       - "traefik.http.services.n8n.loadbalancer.server.port=5678"
       - "traefik.docker.network=private-bridge"
+    volumes:
+      - n8n-data:/home/node/.n8n
+    networks:
+      - private-bridge
+
+  n8n-worker:
+    container_name: n8n-worker
+    image: n8nio/n8n:latest
+    restart: always
+    environment:
+      - N8N_HOST=performa-ia.duckdns.org
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=https
+      - WEBHOOK_URL=https://performa-ia.duckdns.org:8443/
+      - N8N_PROXY_HOPS=1
+      - N8N_SECURE_COOKIE=true
     volumes:
       - n8n-data:/home/node/.n8n
     networks:
