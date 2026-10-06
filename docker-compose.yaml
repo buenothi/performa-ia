@@ -54,8 +54,8 @@ services:
     networks:
       - private-bridge
 
-  n8n-trigger:
-    container_name: n8n-trigger
+  n8n-main:
+    container_name: n8n-main
     image: n8nio/n8n:latest
     restart: always
     environment:
@@ -65,8 +65,17 @@ services:
       - WEBHOOK_URL=https://performa-ia.duckdns.org:8443/
       - N8N_PROXY_HOPS=1
       - N8N_SECURE_COOKIE=true
-      - QUEUE_BULL_REDIS_HOST=localhost
+      # Ativação do modo Queue e apontamento para o serviço Redis da Stack
+      - EXECUTIONS_MODE=queue
+      - QUEUE_BULL_REDIS_HOST=redis
       - QUEUE_BULL_REDIS_PORT=6379
+      # Conexão obrigatória com o Postgres (Modo Queue não aceita SQLite)
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_DATABASE=${POSTGRES_DB}
+      - DB_POSTGRESDB_USER=${POSTGRES_USER}
+      - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD}
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.n8n.rule=Host(`performa-ia.duckdns.org`)"
@@ -79,22 +88,37 @@ services:
       - n8n-data:/home/node/.n8n
     networks:
       - private-bridge
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
   n8n-worker:
     container_name: n8n-worker
     image: n8nio/n8n:latest
+    command: worker  # Define que este container vai apenas processar as tarefas da fila
     restart: always
     environment:
-      - N8N_HOST=performa-ia.duckdns.org
-      - N8N_PORT=5678
-      - N8N_PROTOCOL=https
-      - WEBHOOK_URL=https://performa-ia.duckdns.org:8443/
-      - N8N_PROXY_HOPS=1
-      - N8N_SECURE_COOKIE=true
+      - EXECUTIONS_MODE=queue
+      - QUEUE_BULL_REDIS_HOST=redis
+      - QUEUE_BULL_REDIS_PORT=6379
+      # O Worker precisa apontar obrigatoriamente para o mesmo banco de dados do Trigger
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_DATABASE=${POSTGRES_DB}
+      - DB_POSTGRESDB_USER=${POSTGRES_USER}
+      - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD}
     volumes:
       - n8n-data:/home/node/.n8n
     networks:
       - private-bridge
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
   evolution-api:
     container_name: evolution_api
