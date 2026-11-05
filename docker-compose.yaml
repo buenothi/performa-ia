@@ -250,6 +250,23 @@ services:
       retries: 10
     networks:
       - private-bridge
+  
+  asterisk:
+    build: ./asterisk
+    container_name: asterisk
+    restart: unless-stopped
+    volumes:
+      - ./asterisk/conf/pjsip.conf:/etc/asterisk/pjsip.conf:ro
+      - ./asterisk/conf/extensions.conf:/etc/asterisk/extensions.conf:ro
+      - ./asterisk/conf/http.conf:/etc/asterisk/http.conf:ro
+      - ./asterisk/conf/ari.conf:/etc/asterisk/ari.conf:ro
+      - ./asterisk/conf/rtp.conf:/etc/asterisk/rtp.conf:ro
+    ports:
+      - "5060:5060/udp"            # SIP com o 3CX (só na LAN; NÃO abra no roteador)
+      - "10000-10050:10000-10050/udp"  # áudio (RTP)
+    # a porta 8088 (ARI) NÃO é publicada: só o n8n acessa, pela rede interna
+    networks:
+      - private-bridge
 
 networks:
   private-bridge:
